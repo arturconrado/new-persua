@@ -1,0 +1,17 @@
+{
+  "openrouterApiKey": "",
+  "llmProvider": "openrouter",
+  "model": "openai/gpt-4-turbo",
+  "language": "pt-BR",
+  "opacity": 0.95,
+  "autoSuggestMode": false,
+  "showTranscription": true,
+  "audioSource": "system",
+  "whisperMode": "api",
+  "windowPosition": {
+    "x": null,
+    "y": null,
+    "width": 400,
+    "height": 600
+  }
+}

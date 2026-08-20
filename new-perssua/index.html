@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; font-src 'self' data:;">
+  <title>New Perssua - Assistente de Reunião</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <!-- Container principal -->
+  <div id="app" class="app-container">
+    
+    <!-- Header com controles -->
+    <header class="header">
+      <div class="header-left">
+        <h1 class="app-title">New Perssua</h1>
+        <span id="status-indicator" class="status-indicator" title="Status"></span>
+      </div>
+      
+      <div class="header-right">
+        <!-- Botão de captura de áudio -->
+        <button id="btn-audio-toggle" class="icon-btn" title="Iniciar/Parar captura de áudio">
+          <svg class="icon icon-mic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/>
+            <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
+            <line x1="12" y1="19" x2="12" y2="23"/>
+            <line x1="8" y1="23" x2="16" y2="23"/>
+          </svg>
+        </button>
+        
+        <!-- Visualização de waveform -->
+        <div id="waveform-container" class="waveform-container">
+          <canvas id="waveform-canvas"></canvas>
+        </div>
+        
+        <!-- Indicador do modo -->
+        <span id="mode-indicator" class="mode-indicator" title="Modo atual">AUTO</span>
+        
+        <!-- Botão de configurações -->
+        <button id="btn-settings" class="icon-btn" title="Configurações">
+          <svg class="icon icon-settings" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="12" cy="12" r="3"/>
+            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+          </svg>
+        </button>
+      </div>
+    </header>
+
+    <!-- Área de transcrição -->
+    <section id="transcription-section" class="section transcription-section">
+      <div class="section-header">
+        <h2 class="section-title">Transcrição</h2>
+        <span id="transcription-status" class="status-badge">Aguardando...</span>
+      </div>
+      <div id="transcription-content" class="content-area">
+        <div id="transcription-text" class="text-content">
+          <p class="placeholder-text">A transcrição aparecerá aqui quando a captura de áudio estiver ativa...</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- Área de respostas da IA -->
+    <section id="response-section" class="section response-section">
+      <div class="section-header">
+        <h2 class="section-title">Respostas Sugeridas</h2>
+        <button id="btn-copy-response" class="small-btn" title="Copiar resposta">
+          <svg class="icon icon-copy" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
+            <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
+          </svg>
+        </button>
+      </div>
+      <div id="response-content" class="content-area">
+        <div id="response-text" class="text-content ai-response">
+          <p class="placeholder-text">As respostas da IA aparecerão aqui...</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- Input manual -->
+    <section class="input-section">
+      <div class="input-wrapper">
+        <input 
+          type="text" 
+          id="manual-input" 
+          class="manual-input" 
+          placeholder="Digite sua pergunta (Ctrl+K para focar)..."
+          autocomplete="off"
+        />
+        <button id="btn-send" class="send-btn" title="Enviar pergunta">
+          <svg class="icon icon-send" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <line x1="22" y1="2" x2="11" y2="13"/>
+            <polygon points="22 2 15 22 11 13 2 9 22 2"/>
+          </svg>
+        </button>
+      </div>
+    </section>
+
+    <!-- Barra de status -->
+    <footer class="footer">
+      <div class="status-bar">
+        <span id="audio-status" class="status-item">
+          <span class="status-dot"></span>
+          Áudio: <span class="status-text">Inativo</span>
+        </span>
+        <span id="transcription-status-bar" class="status-item">
+          <span class="status-dot"></span>
+          Transcrição: <span class="status-text">Inativa</span>
+        </span>
+        <span id="llm-status-bar" class="status-item">
+          <span class="status-dot"></span>
+          LLM: <span class="status-text">Pronto</span>
+        </span>
+      </div>
+      <div class="version-info">
+        v<span id="app-version">1.0.0</span>
+      </div>
+    </footer>
+
+    <!-- Modal de Configurações -->
+    <div id="settings-modal" class="modal hidden">
+      <div class="modal-overlay"></div>
+      <div class="modal-content">
+        <div class="modal-header">
+          <h2 class="modal-title">Configurações</h2>
+          <button id="btn-close-settings" class="close-btn">&times;</button>
+        </div>
+        
+          <!-- Provedor LLM -->
+          <div class="setting-group">
+            <label class="setting-label">Provedor LLM</label>
+            <select id="config-llm-provider" class="setting-select" disabled>
+              <option value="openrouter">OpenRouter (Padrão)</option>
+            </select>
+            <small class="setting-help">OpenRouter é o único provedor suportado - acesse múltiplos modelos com uma chave</small>
+          </div>
+
+          <!-- API Key OpenRouter -->
+          <div class="setting-group" id="openrouter-key-group">
+            <label class="setting-label">OpenRouter API Key</label>
+            <input type="password" id="config-openrouter-key" class="setting-input" placeholder="sk-or-..." />
+            <small class="setting-help">Obtenha em: https://openrouter.ai/keys</small>
+          </div>
+
+          <!-- Modelo -->
+          <div class="setting-group">
+            <label class="setting-label">Modelo</label>
+            <input type="text" id="config-model" class="setting-input" placeholder="openai/gpt-4-turbo, anthropic/claude-3-opus" />
+            <small class="setting-help">Veja modelos em: https://openrouter.ai/models</small>
+          </div>
+
+          <!-- Idioma -->
+          <div class="setting-group">
+            <label class="setting-label">Idioma da Transcrição</label>
+            <select id="config-language" class="setting-select">
+              <option value="pt-BR">Português (Brasil)</option>
+              <option value="en-US">English (US)</option>
+              <option value="es-ES">Español</option>
+              <option value="fr-FR">Français</option>
+              <option value="de-DE">Deutsch</option>
+            </select>
+          </div>
+
+          <!-- Modo Whisper -->
+          <div class="setting-group">
+            <label class="setting-label">Modo Whisper</label>
+            <select id="config-whisper-mode" class="setting-select">
+              <option value="api">API (Pago, Rápido)</option>
+              <option value="local">Local (Gratuito, Requer instalação)</option>
+            </select>
+          </div>
+
+          <!-- Opacidade -->
+          <div class="setting-group">
+            <label class="setting-label">Opacidade da Janela</label>
+            <input type="range" id="config-opacity" class="setting-range" min="0.5" max="1" step="0.05" />
+            <span id="opacity-value" class="setting-value">95%</span>
+          </div>
+
+          <!-- Fonte de Áudio -->
+          <div class="setting-group">
+            <label class="setting-label">Fonte de Áudio</label>
+            <select id="config-audio-source" class="setting-select">
+              <option value="system">Áudio do Sistema (Recomendado)</option>
+              <option value="microphone">Microfone</option>
+            </select>
+            <small class="setting-help" id="audio-source-help">
+              Windows: Requer windows-audio-capture<br>
+              macOS: Requer BlackHole instalado
+            </small>
+          </div>
+
+          <!-- Modo Auto-suggest -->
+          <div class="setting-group">
+            <label class="setting-label toggle-label">
+              <span>Auto-suggest (Sugestões Automáticas)</span>
+              <input type="checkbox" id="config-auto-suggest" class="toggle-input" />
+              <span class="toggle-slider"></span>
+            </label>
+          </div>
+
+          <!-- Mostrar transcrição -->
+          <div class="setting-group">
+            <label class="setting-label toggle-label">
+              <span>Mostrar Transcrição</span>
+              <input type="checkbox" id="config-show-transcription" class="toggle-input" checked />
+              <span class="toggle-slider"></span>
+            </label>
+          </div>
+        </div>
+
+        <div class="modal-footer">
+          <button id="btn-save-settings" class="primary-btn">Salvar</button>
+          <button id="btn-cancel-settings" class="secondary-btn">Cancelar</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Notificações Toast -->
+    <div id="toast-container" class="toast-container"></div>
+
+  </div>
+
+  <!-- Scripts -->
+  <script src="src/audio/waveform.js"></script>
+  <script src="renderer.js"></script>
+</body>
+</html>
