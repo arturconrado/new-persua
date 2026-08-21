@@ -296,6 +296,8 @@ Teste abrindo o Photo Booth (macOS) ou Camera (Windows) e veja se a janela apare
 
 **macOS**: autorize o app em Ajustes do Sistema > Privacidade e Segurança > Microfone.
 
+Para a tela, abra **Privacidade e Segurança > Gravação de Tela e Áudio do Sistema**. Ao executar com `npm start`, habilite **Electron**; no aplicativo empacotado, habilite **New Perssua**. Reinicie o processo depois da alteração.
+
 ### Problema 3: Erro "API key não configurada"
 **Solução**:
 1. Abra as configurações pelo ícone de engrenagem

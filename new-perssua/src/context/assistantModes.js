@@ -16,6 +16,10 @@ function normalizeAssistantMode(mode) {
   return Object.hasOwn(ASSISTANT_MODES, mode) ? mode : 'meeting';
 }
 
+function hasAssistantContext({ transcript = '', screenFrame = '' }) {
+  return Boolean(transcript.trim() || screenFrame);
+}
+
 function buildAssistantPrompt({ mode, transcript = '', question = '', hasScreen = false }) {
   const selectedMode = normalizeAssistantMode(mode);
   const action = selectedMode === 'meeting'
@@ -32,9 +36,9 @@ function buildAssistantPrompt({ mode, transcript = '', question = '', hasScreen 
 }
 
 if (typeof window !== 'undefined') {
-  window.AssistantModes = { ASSISTANT_MODES, normalizeAssistantMode, buildAssistantPrompt };
+  window.AssistantModes = { ASSISTANT_MODES, normalizeAssistantMode, hasAssistantContext, buildAssistantPrompt };
 }
 
 if (typeof module !== 'undefined') {
-  module.exports = { ASSISTANT_MODES, normalizeAssistantMode, buildAssistantPrompt };
+  module.exports = { ASSISTANT_MODES, normalizeAssistantMode, hasAssistantContext, buildAssistantPrompt };
 }

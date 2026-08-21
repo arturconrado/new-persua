@@ -6,7 +6,7 @@
   "scripts": {
     "start": "electron .",
     "dev": "electron . --enable-logging",
-    "test": "node test/assistantModes.test.js",
+    "test": "node test/assistantModes.test.js && node test/screenAccess.test.js && node test/config.test.js",
     "build": "electron-builder",
     "build:whisper": "bash scripts/build-whisper.sh",
     "build:whisper:win": "scripts\\build-whisper.bat"
@@ -40,6 +40,8 @@
     "files": [
       "**/*",
       "!**/*.md",
+      "!.env",
+      "!.env.*",
       "!.gitignore"
     ],
     "mac": {

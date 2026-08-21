@@ -1,8 +1,10 @@
 const assert = require('node:assert/strict');
-const { ASSISTANT_MODES, normalizeAssistantMode, buildAssistantPrompt } = require('../src/context/assistantModes');
+const { ASSISTANT_MODES, normalizeAssistantMode, hasAssistantContext, buildAssistantPrompt } = require('../src/context/assistantModes');
 
 assert.deepEqual(Object.keys(ASSISTANT_MODES), ['meeting', 'study']);
 assert.equal(normalizeAssistantMode('anything-else'), 'meeting');
+assert.equal(hasAssistantContext({ transcript: 'Somente áudio', screenFrame: '' }), true);
+assert.equal(hasAssistantContext({ transcript: '', screenFrame: '' }), false);
 
 const meetingPrompt = buildAssistantPrompt({ mode: 'meeting', transcript: 'O prazo é sexta.', hasScreen: true });
 assert.match(meetingPrompt, /sugestão de fala ou ação/i);

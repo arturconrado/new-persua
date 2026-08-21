@@ -365,6 +365,13 @@ html, body {
   color: var(--text-muted);
 }
 
+.status-item.actionable {
+  color: var(--accent-warning);
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
 .status-dot {
   width: 6px;
   height: 6px;

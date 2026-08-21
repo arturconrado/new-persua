@@ -31,6 +31,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   // Contexto visual (imagem JPEG em base64 da tela principal)
   captureScreenFrame: () => ipcRenderer.invoke('capture-screen-frame'),
+  openScreenPrivacySettings: () => ipcRenderer.invoke('open-screen-privacy-settings'),
   
   // Input manual
   onFocusManualInput: (callback) => {

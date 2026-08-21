@@ -18,6 +18,7 @@ const state = {
   latestScreenFrame: '',
   screenFingerprint: '',
   screenCaptureFailed: false,
+  screenCaptureBlocked: false,
   lastSuggestionFingerprint: '',
   lastSuggestionAt: 0,
   lastReportedError: '',
@@ -47,6 +48,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   updateVersion();
   startScreenCapture();
   await startAudioCapture();
+  if (!hasOpenRouterKey()) showMissingAPIKeyState();
   logger.info('Interface inicializada com contexto nativo');
 });
 
@@ -114,6 +116,7 @@ function setupEventListeners() {
   elements.btnCancelSettings.addEventListener('click', hideSettingsModal);
   elements.btnCloseSettings.addEventListener('click', hideSettingsModal);
   elements.settingsModal.querySelector('.modal-overlay').addEventListener('click', hideSettingsModal);
+  elements.screenStatus.addEventListener('click', openScreenPrivacySettings);
   elements.modeSelector.addEventListener('change', event => setAssistantMode(event.target.value));
   elements.configOpacity.addEventListener('input', event => {
     const value = Number(event.target.value);
@@ -171,7 +174,7 @@ async function startAudioCapture() {
     connectWaveform(state.audioStream);
     startNextAudioChunk();
 
-    if (!state.config.openrouterApiKey) {
+    if (!hasOpenRouterKey()) {
       reportOnce('missing-key', 'Adicione sua chave OpenRouter para ativar transcrição e sugestões.', 'warning');
     }
   } catch (error) {
@@ -217,7 +220,7 @@ function startNextAudioChunk() {
   recorder.addEventListener('stop', () => {
     const audio = new Blob(parts, { type: recorder.mimeType || 'audio/webm' });
     if (state.isAudioCapturing) startNextAudioChunk();
-    if (audio.size > 1000 && state.config.openrouterApiKey) {
+    if (audio.size > 1000 && hasOpenRouterKey()) {
       state.transcriptionQueue = state.transcriptionQueue
         .then(() => transcribeAudio(audio))
         .catch(error => handleContextError('transcrição', error));
@@ -301,26 +304,69 @@ function addTranscription(text) {
   scheduleAutoSuggestion(1200);
 }
 
-function startScreenCapture() {
-  captureScreenFrame();
-  state.screenTimer = setInterval(captureScreenFrame, SCREEN_CAPTURE_MS);
+async function startScreenCapture() {
+  const shouldRetry = await captureScreenFrame();
+  if (shouldRetry) state.screenTimer = setInterval(captureScreenFrame, SCREEN_CAPTURE_MS);
 }
 
 async function captureScreenFrame() {
   try {
-    const jpegBase64 = await window.electronAPI.captureScreenFrame();
+    const result = await window.electronAPI.captureScreenFrame();
+    if (!result.ok) {
+      const shouldRetry = window.ScreenAccess.canRetryScreenCapture(result.status);
+      setScreenAccessBlocked(!shouldRetry);
+      updateStatusItem(elements.screenStatus, false, 'Sem acesso');
+      if (!state.screenCaptureFailed) {
+        logger.error(`Captura de tela indisponível (${result.status}): ${result.error || 'permissão necessária'}`);
+      }
+      state.screenCaptureFailed = true;
+      if (!shouldRetry) clearInterval(state.screenTimer);
+      return shouldRetry;
+    }
+
+    const jpegBase64 = result.image;
     const nextFingerprint = fingerprint(jpegBase64);
     const changed = nextFingerprint !== state.screenFingerprint;
     state.latestScreenFrame = `data:image/jpeg;base64,${jpegBase64}`;
     state.screenFingerprint = nextFingerprint;
     state.screenCaptureFailed = false;
+    setScreenAccessBlocked(false);
     updateStatusItem(elements.screenStatus, true, 'Ativa');
     if (changed) scheduleAutoSuggestion(state.currentTranscription ? 3000 : 5000);
+    return true;
   } catch (error) {
     updateStatusItem(elements.screenStatus, false, 'Sem acesso');
-    reportOnce('screen-permission', 'Autorize Gravação de Tela nas configurações de Privacidade do sistema.', 'error');
     if (!state.screenCaptureFailed) logger.error(`Falha na captura de tela: ${error.message}`);
     state.screenCaptureFailed = true;
+    return true;
+  }
+}
+
+function setScreenAccessBlocked(isBlocked) {
+  state.screenCaptureBlocked = isBlocked;
+  elements.screenStatus.classList.toggle('actionable', isBlocked);
+  elements.screenStatus.title = isBlocked
+    ? 'Clique para abrir as permissões de Gravação de Tela'
+    : 'Status da captura de tela';
+
+  if (isBlocked) {
+    reportOnce(
+      'screen-permission',
+      'Tela bloqueada. Clique em “Tela: Sem acesso”, autorize o app e reinicie.',
+      'warning'
+    );
+  }
+}
+
+async function openScreenPrivacySettings() {
+  if (!state.screenCaptureBlocked) return;
+  try {
+    const result = await window.electronAPI.openScreenPrivacySettings();
+    if (result.opened) {
+      showToast(`Ative “${result.appName}” em Gravação de Tela e reinicie o app.`, 'info');
+    }
+  } catch (error) {
+    logger.error(`Não foi possível abrir os Ajustes do Sistema: ${error.message}`);
   }
 }
 
@@ -335,15 +381,18 @@ function fingerprint(value) {
 }
 
 function scheduleAutoSuggestion(delay) {
-  if (!state.config.openrouterApiKey) return;
+  if (!hasOpenRouterKey()) return;
   clearTimeout(state.suggestionTimer);
   const throttle = Math.max(0, MIN_SUGGESTION_INTERVAL_MS - (Date.now() - state.lastSuggestionAt));
   state.suggestionTimer = setTimeout(generateAutoSuggestion, Math.max(delay, throttle));
 }
 
 async function generateAutoSuggestion() {
-  if (!state.isLLMReady || !state.config.openrouterApiKey) return;
-  if (!state.latestScreenFrame && !state.currentTranscription) return;
+  if (!state.isLLMReady || !hasOpenRouterKey()) return;
+  if (!window.AssistantModes.hasAssistantContext({
+    transcript: state.currentTranscription,
+    screenFrame: state.latestScreenFrame
+  })) return;
   const contextFingerprint = `${state.assistantMode}:${state.screenFingerprint}:${state.currentTranscription}`;
   if (contextFingerprint === state.lastSuggestionFingerprint) return;
 
@@ -400,7 +449,7 @@ async function sendManualQuestion() {
 }
 
 async function callLLM(prompt, screenFrame) {
-  if (!state.config.openrouterApiKey) throw new Error('Configure a chave OpenRouter.');
+  if (!hasOpenRouterKey()) throw new Error('Configure a chave OpenRouter.');
   const content = [{ type: 'text', text: prompt }];
   if (screenFrame) content.push({ type: 'image_url', image_url: { url: screenFrame } });
 
@@ -463,7 +512,9 @@ function updateTranscription(text) {
 
 function updateAudioStatus(isActive) {
   updateStatusItem(elements.audioStatus, isActive, isActive ? 'Ativo' : 'Pausado');
-  elements.transcriptionStatus.textContent = isActive ? 'Ouvindo...' : 'Pausado';
+  elements.transcriptionStatus.textContent = isActive
+    ? (hasOpenRouterKey() ? 'Ouvindo...' : 'Microfone ativo · configure a chave')
+    : 'Pausado';
   elements.btnAudioToggle.classList.toggle('active', isActive);
   elements.btnAudioToggle.title = isActive ? 'Pausar microfone' : 'Retomar microfone';
 }
@@ -502,13 +553,31 @@ async function saveSettings() {
     state.config = { ...state.config, ...configs };
     document.body.style.opacity = configs.opacity;
     applyTranscriptionVisibility();
-    hideSettingsModal();
-    state.lastSuggestionFingerprint = '';
-    scheduleAutoSuggestion(250);
-    showToast('Configurações salvas.', 'success');
+    if (hasOpenRouterKey()) {
+      hideSettingsModal();
+      state.lastReportedError = '';
+      updateLLMStatus('Pronto', false);
+      updateAudioStatus(state.isAudioCapturing);
+      state.lastSuggestionFingerprint = '';
+      scheduleAutoSuggestion(250);
+      showToast('Chave salva. A transcrição começará no próximo trecho de áudio.', 'success');
+    } else {
+      showMissingAPIKeyState();
+    }
   } catch (error) {
     showToast(`Erro ao salvar: ${error.message}`, 'error');
   }
+}
+
+function hasOpenRouterKey() {
+  return Boolean(state.config.openrouterApiKey?.trim());
+}
+
+function showMissingAPIKeyState() {
+  updateLLMStatus('Configure a chave', false);
+  updateAudioStatus(state.isAudioCapturing);
+  elements.responseText.innerHTML = '<p class="placeholder-text">O microfone está ativo, mas a transcrição precisa de uma OpenRouter API Key. Informe a chave nas configurações.</p>';
+  showSettingsModal();
 }
 
 function applyTranscriptionVisibility() {

@@ -3,10 +3,21 @@
  * Processo principal do Electron com configuração de overlay invisível
  */
 
-const { app, BrowserWindow, desktopCapturer, ipcMain, globalShortcut, screen } = require('electron');
+const { app, BrowserWindow, desktopCapturer, ipcMain, globalShortcut, screen, shell, systemPreferences } = require('electron');
 const path = require('path');
 const Store = require('electron-store');
 const fs = require('fs');
+const { isScreenAccessBlocked } = require('./src/utils/screenAccess');
+const { resolveConfigValue } = require('./src/utils/config');
+
+const envPath = path.join(__dirname, '.env');
+if (fs.existsSync(envPath)) {
+  try {
+    process.loadEnvFile(envPath);
+  } catch (error) {
+    console.error('Não foi possível carregar o arquivo .env:', error.message);
+  }
+}
 
 // Inicializa o store de configurações
 const store = new Store({
@@ -22,6 +33,13 @@ const store = new Store({
     windowPosition: { x: null, y: null, width: 400, height: 600 }
   }
 });
+
+function getConfig(key) {
+  if (key === 'openrouterApiKey') {
+    return resolveConfigValue(store.get(key), process.env.OPENROUTER_API_KEY);
+  }
+  return store.get(key);
+}
 
 let mainWindow = null;
 let isOverlayVisible = false;
@@ -227,7 +245,7 @@ function quitApp() {
 function setupIpcHandlers() {
   // Obter configurações
   ipcMain.handle('get-config', (event, key) => {
-    return store.get(key);
+    return getConfig(key);
   });
 
   // Salvar configuração
@@ -238,7 +256,7 @@ function setupIpcHandlers() {
 
   // Obter todas as configurações
   ipcMain.handle('get-all-configs', () => {
-    return store.store;
+    return { ...store.store, openrouterApiKey: getConfig('openrouterApiKey') };
   });
 
   // Salvar múltiplas configurações
@@ -265,19 +283,38 @@ function setupIpcHandlers() {
 
   // Retorna somente uma imagem reduzida da tela principal ao renderer.
   ipcMain.handle('capture-screen-frame', async () => {
-    const sources = await desktopCapturer.getSources({
-      types: ['screen'],
-      thumbnailSize: { width: 960, height: 540 },
-      fetchWindowIcons: false
-    });
-    const primaryId = String(screen.getPrimaryDisplay().id);
-    const source = sources.find(item => item.display_id === primaryId) || sources[0];
+    const getAccessStatus = () => process.platform === 'darwin'
+      ? systemPreferences.getMediaAccessStatus('screen')
+      : 'granted';
+    const accessStatus = getAccessStatus();
 
-    if (!source || source.thumbnail.isEmpty()) {
-      throw new Error('Nenhuma tela disponível para captura.');
+    if (isScreenAccessBlocked(accessStatus)) {
+      return { ok: false, status: accessStatus };
     }
 
-    return source.thumbnail.toJPEG(70).toString('base64');
+    try {
+      const sources = await desktopCapturer.getSources({
+        types: ['screen'],
+        thumbnailSize: { width: 960, height: 540 },
+        fetchWindowIcons: false
+      });
+      const primaryId = String(screen.getPrimaryDisplay().id);
+      const source = sources.find(item => item.display_id === primaryId) || sources[0];
+
+      if (!source || source.thumbnail.isEmpty()) {
+        return { ok: false, status: getAccessStatus(), error: 'Nenhuma tela disponível para captura.' };
+      }
+
+      return { ok: true, status: getAccessStatus(), image: source.thumbnail.toJPEG(70).toString('base64') };
+    } catch (error) {
+      return { ok: false, status: getAccessStatus(), error: error.message };
+    }
+  });
+
+  ipcMain.handle('open-screen-privacy-settings', async () => {
+    if (process.platform !== 'darwin') return { opened: false, appName: app.getName() };
+    await shell.openExternal('x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture');
+    return { opened: true, appName: app.isPackaged ? app.getName() : 'Electron' };
   });
 
   // Audio data received from renderer
@@ -351,6 +388,7 @@ app.whenReady().then(() => {
   console.log('Platform:', process.platform);
   console.log('Arch:', process.arch);
   console.log('Electron version:', process.versions.electron);
+  console.log(`OpenRouter API key: ${getConfig('openrouterApiKey') ? 'configurada' : 'ausente'}`);
 });
 
 // Prevenir múltiplas instâncias
