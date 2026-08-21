@@ -146,6 +146,11 @@ html, body {
   border-color: var(--accent-primary);
 }
 
+.icon-btn.active {
+  background: var(--accent-success);
+  border-color: var(--accent-success);
+}
+
 .icon-btn:active {
   transform: scale(0.95);
 }
@@ -169,15 +174,23 @@ html, body {
   height: 100%;
 }
 
-.mode-indicator {
+.mode-selector {
   padding: var(--spacing-xs) var(--spacing-sm);
   background: var(--accent-primary);
   color: white;
+  border: 1px solid rgba(255, 255, 255, 0.18);
   border-radius: var(--radius-sm);
   font-size: 10px;
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.5px;
+  outline: none;
+  cursor: pointer;
+}
+
+.mode-selector option {
+  color: var(--text-primary);
+  background: #1e293b;
 }
 
 /* ============================================
@@ -460,6 +473,15 @@ html, body {
   flex: 1;
   overflow-y: auto;
   padding: var(--spacing-lg);
+}
+
+.settings-intro {
+  margin-bottom: var(--spacing-lg);
+  padding: var(--spacing-md);
+  color: var(--text-secondary);
+  background: rgba(59, 130, 246, 0.1);
+  border-left: 3px solid var(--accent-primary);
+  border-radius: var(--radius-md);
 }
 
 .modal-footer {

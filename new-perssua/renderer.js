@@ -1,68 +1,71 @@
 /**
- * New Perssua - Renderer Process
- * Lógica principal do frontend
+ * New Perssua - contexto nativo de tela + microfone e assistência automática.
  */
 
-// Estado global
+const AUDIO_CHUNK_MS = 8000;
+const SCREEN_CAPTURE_MS = 5000;
+const MIN_SUGGESTION_INTERVAL_MS = 12000;
+
 const state = {
   isAudioCapturing: false,
   isTranscribing: false,
   isLLMReady: true,
-  autoSuggestMode: false,
+  assistantMode: 'meeting',
   currentTranscription: '',
   currentResponse: '',
+  transcriptSegments: [],
   transcriptionHistory: [],
+  latestScreenFrame: '',
+  screenFingerprint: '',
+  screenCaptureFailed: false,
+  lastSuggestionFingerprint: '',
+  lastSuggestionAt: 0,
+  lastReportedError: '',
+  audioStream: null,
+  audioRecorder: null,
+  audioStopTimer: null,
+  audioContext: null,
+  analyserFrame: null,
+  screenTimer: null,
+  suggestionTimer: null,
+  transcriptionQueue: Promise.resolve(),
   config: {}
 };
 
-// Elementos DOM
 const elements = {};
 
-// Inicialização
 document.addEventListener('DOMContentLoaded', async () => {
-  console.log('New Perssua - Renderer iniciado');
-  
-  // Cache DOM elements
   cacheElements();
-  
-  // Load config
   await loadConfig();
-  
-  // Setup event listeners
   setupEventListeners();
-  
-  // Setup IPC listeners
   setupIPCListeners();
-  
-  // Initialize waveform
+
   if (window.WaveformVisualizer) {
     window.waveformViz = new window.WaveformVisualizer('waveform-canvas');
   }
-  
-  // Update version
+
   updateVersion();
-  
-  logger.info('Interface inicializada');
+  startScreenCapture();
+  await startAudioCapture();
+  logger.info('Interface inicializada com contexto nativo');
 });
 
-// Cache DOM elements
 function cacheElements() {
   elements.btnAudioToggle = document.getElementById('btn-audio-toggle');
   elements.btnSettings = document.getElementById('btn-settings');
   elements.btnSend = document.getElementById('btn-send');
   elements.btnCopyResponse = document.getElementById('btn-copy-response');
   elements.manualInput = document.getElementById('manual-input');
+  elements.transcriptionSection = document.getElementById('transcription-section');
   elements.transcriptionText = document.getElementById('transcription-text');
   elements.responseText = document.getElementById('response-text');
+  elements.responseSectionTitle = document.getElementById('response-section-title');
   elements.transcriptionStatus = document.getElementById('transcription-status');
-  elements.modeIndicator = document.getElementById('mode-indicator');
-  elements.statusIndicator = document.getElementById('status-indicator');
+  elements.modeSelector = document.getElementById('mode-selector');
   elements.audioStatus = document.getElementById('audio-status');
-  elements.transcriptionStatusBar = document.getElementById('transcription-status-bar');
+  elements.screenStatus = document.getElementById('screen-status');
   elements.llmStatusBar = document.getElementById('llm-status-bar');
   elements.appVersion = document.getElementById('app-version');
-  
-  // Settings modal elements
   elements.settingsModal = document.getElementById('settings-modal');
   elements.btnSaveSettings = document.getElementById('btn-save-settings');
   elements.btnCancelSettings = document.getElementById('btn-cancel-settings');
@@ -70,460 +73,490 @@ function cacheElements() {
   elements.configLlmProvider = document.getElementById('config-llm-provider');
   elements.configOpenRouterKey = document.getElementById('config-openrouter-key');
   elements.configModel = document.getElementById('config-model');
+  elements.configTranscriptionModel = document.getElementById('config-transcription-model');
   elements.configLanguage = document.getElementById('config-language');
-  elements.configWhisperMode = document.getElementById('config-whisper-mode');
   elements.configOpacity = document.getElementById('config-opacity');
   elements.opacityValue = document.getElementById('opacity-value');
-  elements.configAudioSource = document.getElementById('config-audio-source');
-  elements.configAutoSuggest = document.getElementById('config-auto-suggest');
   elements.configShowTranscription = document.getElementById('config-show-transcription');
-  
-  // Setting groups
-  elements.openRouterKeyGroup = document.getElementById('openrouter-key-group');
 }
 
-// Load configuration
 async function loadConfig() {
   try {
     state.config = await window.electronAPI.getAllConfigs();
-    
-    // Apply config to UI
-    elements.configLlmProvider.value = state.config.llmProvider || 'openrouter';
+    state.assistantMode = window.AssistantModes.normalizeAssistantMode(state.config.assistantMode);
+
+    elements.configLlmProvider.value = 'openrouter';
     elements.configOpenRouterKey.value = state.config.openrouterApiKey || '';
-    elements.configModel.value = state.config.model || 'openai/gpt-4-turbo';
+    elements.configModel.value = state.config.model || 'google/gemini-2.5-flash';
+    elements.configTranscriptionModel.value = state.config.transcriptionModel || 'openai/whisper-1';
     elements.configLanguage.value = state.config.language || 'pt-BR';
-    elements.configWhisperMode.value = state.config.whisperMode || 'api';
     elements.configOpacity.value = state.config.opacity || 0.95;
     elements.opacityValue.textContent = `${Math.round((state.config.opacity || 0.95) * 100)}%`;
-    elements.configAudioSource.value = state.config.audioSource || 'system';
-    elements.configAutoSuggest.checked = state.config.autoSuggestMode || false;
     elements.configShowTranscription.checked = state.config.showTranscription !== false;
-    
-    state.autoSuggestMode = state.config.autoSuggestMode || false;
-    updateModeIndicator();
-    
-    // Show/hide API key fields based on provider
-    updateAPIKeyFields();
-    
-    logger.info('Configuração carregada');
+    document.body.style.opacity = state.config.opacity || 0.95;
+
+    updateModeUI();
+    applyTranscriptionVisibility();
   } catch (error) {
     logger.error('Erro ao carregar configuração: ' + error.message);
   }
 }
 
-// Setup event listeners
 function setupEventListeners() {
-  // Audio toggle button
-  elements.btnAudioToggle.addEventListener('click', () => {
-    toggleAudioCapture();
+  elements.btnAudioToggle.addEventListener('click', () => window.electronAPI.toggleAudioCapture());
+  elements.btnSettings.addEventListener('click', showSettingsModal);
+  elements.btnSend.addEventListener('click', sendManualQuestion);
+  elements.manualInput.addEventListener('keydown', event => {
+    if (event.key === 'Enter') sendManualQuestion();
   });
-  
-  // Settings button
-  elements.btnSettings.addEventListener('click', () => {
-    showSettingsModal();
-  });
-  
-  // Send button
-  elements.btnSend.addEventListener('click', () => {
-    sendManualQuestion();
-  });
-  
-  // Manual input enter key
-  elements.manualInput.addEventListener('keypress', (e) => {
-    if (e.key === 'Enter') {
-      sendManualQuestion();
-    }
-  });
-  
-  // Copy response button
-  elements.btnCopyResponse.addEventListener('click', () => {
-    copyLastResponse();
-  });
-  
-  // Settings modal buttons
+  elements.btnCopyResponse.addEventListener('click', copyLastResponse);
   elements.btnSaveSettings.addEventListener('click', saveSettings);
   elements.btnCancelSettings.addEventListener('click', hideSettingsModal);
   elements.btnCloseSettings.addEventListener('click', hideSettingsModal);
-  
-  // Close modal on overlay click
   elements.settingsModal.querySelector('.modal-overlay').addEventListener('click', hideSettingsModal);
-  
-  // LLM provider change
-  elements.configLlmProvider.addEventListener('change', () => {
-    // OpenRouter é o único provedor - não há necessidade de mudar
-    // Apenas manter a UI consistente
-    updateAPIKeyFields();
-  });
-  
-  // Opacity slider
-  elements.configOpacity.addEventListener('input', (e) => {
-    const value = parseFloat(e.target.value);
+  elements.modeSelector.addEventListener('change', event => setAssistantMode(event.target.value));
+  elements.configOpacity.addEventListener('input', event => {
+    const value = Number(event.target.value);
     elements.opacityValue.textContent = `${Math.round(value * 100)}%`;
     document.body.style.opacity = value;
   });
 }
 
-// Setup IPC listeners
 function setupIPCListeners() {
-  // Overlay visibility changed
-  window.electronAPI.onOverlayVisibilityChanged((isVisible) => {
-    logger.info(`Overlay visibilidade: ${isVisible}`);
+  window.electronAPI.onOverlayVisibilityChanged(isVisible => logger.info(`Overlay visibilidade: ${isVisible}`));
+  window.electronAPI.onAudioCaptureToggled(async isActive => {
+    if (isActive) await startAudioCapture();
+    else stopAudioCapture();
   });
-  
-  // Audio capture toggled
-  window.electronAPI.onAudioCaptureToggled((isActive) => {
-    state.isAudioCapturing = isActive;
-    updateAudioStatus(isActive);
-    
-    if (isActive && window.waveformViz) {
-      window.waveformViz.start();
-    } else if (window.waveformViz) {
-      window.waveformViz.stop();
-    }
-  });
-  
-  // Stop audio capture
-  window.electronAPI.onStopAudioCapture(() => {
-    state.isAudioCapturing = false;
-    updateAudioStatus(false);
-    if (window.waveformViz) {
-      window.waveformViz.stop();
-    }
-  });
-  
-  // Focus manual input
+  window.electronAPI.onStopAudioCapture(stopAudioCapture);
   window.electronAPI.onFocusManualInput(() => {
     elements.manualInput.focus();
     elements.manualInput.select();
   });
-  
-  // Mode changed
-  window.electronAPI.onModeChanged((isAutoMode) => {
-    state.autoSuggestMode = isAutoMode;
-    updateModeIndicator();
-    showToast(`Modo ${isAutoMode ? 'Automático' : 'Manual'} ativado`, 'info');
-  });
-  
-  // Copy last response
-  window.electronAPI.onCopyLastResponse(() => {
-    copyLastResponse();
-  });
+  window.electronAPI.onModeChanged(setAssistantMode);
+  window.electronAPI.onCopyLastResponse(copyLastResponse);
 }
 
-// Toggle audio capture
-function toggleAudioCapture() {
-  window.electronAPI.toggleAudioCapture();
+async function setAssistantMode(mode) {
+  state.assistantMode = window.AssistantModes.normalizeAssistantMode(mode);
+  state.config.assistantMode = state.assistantMode;
+  await window.electronAPI.setConfig('assistantMode', state.assistantMode);
+  updateModeUI();
+  state.lastSuggestionFingerprint = '';
+  scheduleAutoSuggestion(250);
+  showToast(`Modo ${state.assistantMode === 'meeting' ? 'Reunião' : 'Estudo'} ativado`, 'info');
 }
 
-// Update audio status UI
-function updateAudioStatus(isActive) {
-  const statusDot = elements.audioStatus.querySelector('.status-dot');
-  const statusText = elements.audioStatus.querySelector('.status-text');
-  
-  if (isActive) {
-    statusDot.classList.add('active');
-    statusText.textContent = 'Ativo';
-    elements.transcriptionStatus.textContent = 'Ouvindo...';
-    elements.btnAudioToggle.style.background = 'var(--accent-success)';
-  } else {
-    statusDot.classList.remove('active');
-    statusText.textContent = 'Inativo';
-    elements.transcriptionStatus.textContent = 'Aguardando...';
-    elements.btnAudioToggle.style.background = '';
-  }
+function updateModeUI() {
+  const isMeeting = state.assistantMode === 'meeting';
+  elements.modeSelector.value = state.assistantMode;
+  elements.responseSectionTitle.textContent = isMeeting ? 'Sugestões da Reunião' : 'Explicações e Anotações';
+  elements.manualInput.placeholder = isMeeting
+    ? 'Pergunte algo sobre a reunião (Ctrl+K)...'
+    : 'Pergunte algo sobre o estudo (Ctrl+K)...';
 }
 
-// Update mode indicator
-function updateModeIndicator() {
-  if (state.autoSuggestMode) {
-    elements.modeIndicator.textContent = 'AUTO';
-    elements.modeIndicator.style.background = 'var(--accent-success)';
-  } else {
-    elements.modeIndicator.textContent = 'MANUAL';
-    elements.modeIndicator.style.background = 'var(--accent-warning)';
-  }
-}
+async function startAudioCapture() {
+  if (state.isAudioCapturing) return;
 
-// Update API key fields visibility
-function updateAPIKeyFields() {
-  // OpenRouter é o único provedor - sempre mostrar o campo de API Key do OpenRouter
-  elements.openRouterKeyGroup.style.display = 'block';
-}
-
-// Show settings modal
-function showSettingsModal() {
-  elements.settingsModal.classList.remove('hidden');
-}
-
-// Hide settings modal
-function hideSettingsModal() {
-  elements.settingsModal.classList.add('hidden');
-}
-
-// Save settings
-async function saveSettings() {
   try {
-    const configs = {
-      llmProvider: elements.configLlmProvider.value,
-      openrouterApiKey: elements.configOpenRouterKey.value,
-      model: elements.configModel.value,
-      language: elements.configLanguage.value,
-      whisperMode: elements.configWhisperMode.value,
-      opacity: parseFloat(elements.configOpacity.value),
-      audioSource: elements.configAudioSource.value,
-      autoSuggestMode: elements.configAutoSuggest.checked,
-      showTranscription: elements.configShowTranscription.checked
-    };
-    
-    await window.electronAPI.setMultipleConfigs(configs);
-    state.config = configs;
-    
-    // Apply opacity
-    document.body.style.opacity = configs.opacity;
-    
-    hideSettingsModal();
-    showToast('Configurações salvas com sucesso!', 'success');
-    logger.info('Configurações salvas');
-  } catch (error) {
-    showToast('Erro ao salvar configurações: ' + error.message, 'error');
-    logger.error('Erro ao salvar configurações: ' + error.message);
-  }
-}
-
-// Send manual question to LLM
-async function sendManualQuestion() {
-  const question = elements.manualInput.value.trim();
-  if (!question) return;
-  
-  // Clear input
-  elements.manualInput.value = '';
-  
-  // Show loading state
-  elements.responseText.innerHTML = '<p class="placeholder-text">Gerando resposta...</p>';
-  state.isLLMReady = false;
-  
-  try {
-    // Get context from recent transcription
-    const context = getRecentTranscription(2); // Last 2 minutes
-    
-    // Build prompt
-    const prompt = buildPrompt(context, question);
-    
-    // Call LLM
-    const response = await callLLM(prompt);
-    
-    // Display response
-    displayResponse(response);
-    
-    // Add to history
-    state.transcriptionHistory.push({
-      type: 'question',
-      content: question,
-      timestamp: new Date().toISOString()
+    if (!window.MediaRecorder) throw new Error('Gravação de áudio não suportada nesta versão do sistema.');
+    state.audioStream = await navigator.mediaDevices.getUserMedia({
+      audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+      video: false
     });
-    
-    state.transcriptionHistory.push({
-      type: 'response',
-      content: response,
-      timestamp: new Date().toISOString()
-    });
-    
+    state.isAudioCapturing = true;
+    window.electronAPI.setAudioCaptureActive(true);
+    updateAudioStatus(true);
+    connectWaveform(state.audioStream);
+    startNextAudioChunk();
+
+    if (!state.config.openrouterApiKey) {
+      reportOnce('missing-key', 'Adicione sua chave OpenRouter para ativar transcrição e sugestões.', 'warning');
+    }
   } catch (error) {
-    logger.error('Erro ao enviar pergunta: ' + error.message);
-    showToast('Erro ao gerar resposta: ' + error.message, 'error');
-    elements.responseText.innerHTML = '<p class="placeholder-text">Erro ao gerar resposta. Tente novamente.</p>';
-  } finally {
-    state.isLLMReady = true;
+    state.audioStream?.getTracks().forEach(track => track.stop());
+    state.audioStream = null;
+    state.isAudioCapturing = false;
+    window.electronAPI.setAudioCaptureActive(false);
+    updateAudioStatus(false);
+    const message = error.name === 'NotAllowedError'
+      ? 'Autorize o microfone nas configurações de Privacidade do sistema.'
+      : `Não foi possível iniciar o microfone: ${error.message}`;
+    reportOnce(message, message, 'error');
+    logger.error(message);
   }
 }
 
-// Get recent transcription (last N minutes)
-function getRecentTranscription(minutes = 2) {
-  // This would be implemented with actual transcription data
-  // For now, return empty string
-  return state.currentTranscription;
+function stopAudioCapture() {
+  state.isAudioCapturing = false;
+  window.electronAPI.setAudioCaptureActive(false);
+  clearTimeout(state.audioStopTimer);
+  if (state.audioRecorder?.state === 'recording') state.audioRecorder.stop();
+  state.audioRecorder = null;
+  state.audioStream?.getTracks().forEach(track => track.stop());
+  state.audioStream = null;
+  if (state.audioContext) state.audioContext.close().catch(() => {});
+  state.audioContext = null;
+  cancelAnimationFrame(state.analyserFrame);
+  window.waveformViz?.stop();
+  updateAudioStatus(false);
 }
 
-// Build prompt for LLM
-function buildPrompt(context, question) {
-  const systemPrompt = `Você é um assistente de reunião especializado em fornecer respostas concisas e acionáveis.
-Contexto da conversa: ${context || 'Nenhum contexto disponível'}
-Pergunta do usuário: ${question}
+function startNextAudioChunk() {
+  if (!state.isAudioCapturing || !state.audioStream) return;
 
-Forneça uma resposta clara, objetiva e prática que o usuário possa usar imediatamente na reunião.`;
+  const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus') ? 'audio/webm;codecs=opus' : '';
+  const recorder = new MediaRecorder(state.audioStream, mimeType ? { mimeType } : undefined);
+  const parts = [];
+  state.audioRecorder = recorder;
 
-  return systemPrompt;
+  recorder.addEventListener('dataavailable', event => {
+    if (event.data.size) parts.push(event.data);
+  });
+  recorder.addEventListener('stop', () => {
+    const audio = new Blob(parts, { type: recorder.mimeType || 'audio/webm' });
+    if (state.isAudioCapturing) startNextAudioChunk();
+    if (audio.size > 1000 && state.config.openrouterApiKey) {
+      state.transcriptionQueue = state.transcriptionQueue
+        .then(() => transcribeAudio(audio))
+        .catch(error => handleContextError('transcrição', error));
+    }
+  });
+
+  recorder.start();
+  state.audioStopTimer = setTimeout(() => {
+    if (recorder.state === 'recording') recorder.stop();
+  }, AUDIO_CHUNK_MS);
 }
 
-// Call LLM API - OpenRouter Only
-async function callLLM(prompt) {
-  const provider = state.config.llmProvider || 'openrouter';
-  
-  // OpenRouter é o único provedor suportado
-  if (provider !== 'openrouter') {
-    logger.warn('Provedor não suportado. Usando OpenRouter.');
-  }
-  
-  const apiKey = state.config.openrouterApiKey;
-  const model = state.config.model || 'openai/gpt-4-turbo';
-  
-  if (!apiKey) {
-    throw new Error('API Key do OpenRouter não configurada.');
-  }
-  
+function connectWaveform(stream) {
+  const AudioContext = window.AudioContext || window.webkitAudioContext;
+  if (!AudioContext || !window.waveformViz) return;
+
+  state.audioContext = new AudioContext();
+  const analyser = state.audioContext.createAnalyser();
+  const samples = new Float32Array(analyser.fftSize);
+  state.audioContext.createMediaStreamSource(stream).connect(analyser);
+  window.waveformViz.start();
+
+  const update = () => {
+    if (!state.isAudioCapturing) return;
+    analyser.getFloatTimeDomainData(samples);
+    window.waveformViz.update(samples);
+    state.analyserFrame = requestAnimationFrame(update);
+  };
+  update();
+}
+
+async function transcribeAudio(blob) {
+  state.isTranscribing = true;
+  elements.transcriptionStatus.textContent = 'Transcrevendo...';
+
   try {
-    const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+    const response = await fetch('https://openrouter.ai/api/v1/audio/transcriptions', {
       method: 'POST',
       headers: {
-        'Authorization': `Bearer ${apiKey}`,
-        'Content-Type': 'application/json',
-        'HTTP-Referer': 'https://newperssua.com',
-        'X-Title': 'New Perssua'
+        Authorization: `Bearer ${state.config.openrouterApiKey}`,
+        'Content-Type': 'application/json'
       },
       body: JSON.stringify({
-        model: model,
-        messages: [
-          { role: 'system', content: 'Você é um assistente de reuniões especializado em fornecer respostas concisas e práticas.' },
-          { role: 'user', content: prompt }
-        ],
-        max_tokens: 500,
-        temperature: 0.7
+        model: state.config.transcriptionModel || 'openai/whisper-1',
+        input_audio: { data: await blobToBase64(blob), format: audioFormat(blob.type) },
+        language: (state.config.language || 'pt-BR').slice(0, 2)
       })
     });
-
-    if (!response.ok) {
-      const errorData = await response.json().catch(() => ({}));
-      throw new Error(`OpenRouter API error: ${response.status}`);
-    }
-
-    const data = await response.json();
-    return data.choices[0].message.content.trim();
-  } catch (error) {
-    logger.error('Erro ao chamar LLM: ' + error.message);
-    throw error;
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(data.error?.message || `OpenRouter retornou ${response.status}`);
+    if (data.text?.trim()) addTranscription(data.text.trim());
+  } finally {
+    state.isTranscribing = false;
+    elements.transcriptionStatus.textContent = state.isAudioCapturing ? 'Ouvindo...' : 'Pausado';
   }
 }
 
-// Display LLM response
-function displayResponse(response) {
-  // Parse markdown (would use marked.js in production)
-  const html = parseMarkdown(response);
-  elements.responseText.innerHTML = html;
-  state.currentResponse = response;
-  
-  // Auto-scroll to bottom
-  const responseContent = document.getElementById('response-content');
-  responseContent.scrollTop = responseContent.scrollHeight;
+function audioFormat(mimeType) {
+  if (mimeType.includes('ogg')) return 'ogg';
+  if (mimeType.includes('mp4')) return 'm4a';
+  return 'webm';
 }
 
-// Simple markdown parser (placeholder for marked.js)
+async function blobToBase64(blob) {
+  const bytes = new Uint8Array(await blob.arrayBuffer());
+  let binary = '';
+  for (let offset = 0; offset < bytes.length; offset += 0x8000) {
+    binary += String.fromCharCode(...bytes.subarray(offset, offset + 0x8000));
+  }
+  return btoa(binary);
+}
+
+function addTranscription(text) {
+  const now = Date.now();
+  state.transcriptSegments.push({ text, timestamp: now });
+  state.transcriptSegments = state.transcriptSegments.filter(item => now - item.timestamp < 3 * 60 * 1000);
+  state.currentTranscription = state.transcriptSegments.map(item => item.text).join(' ');
+  updateTranscription(state.currentTranscription);
+  state.transcriptionHistory.push({ type: 'transcription', content: text, timestamp: new Date().toISOString() });
+  window.electronAPI.sendTranscriptionResult(text);
+  scheduleAutoSuggestion(1200);
+}
+
+function startScreenCapture() {
+  captureScreenFrame();
+  state.screenTimer = setInterval(captureScreenFrame, SCREEN_CAPTURE_MS);
+}
+
+async function captureScreenFrame() {
+  try {
+    const jpegBase64 = await window.electronAPI.captureScreenFrame();
+    const nextFingerprint = fingerprint(jpegBase64);
+    const changed = nextFingerprint !== state.screenFingerprint;
+    state.latestScreenFrame = `data:image/jpeg;base64,${jpegBase64}`;
+    state.screenFingerprint = nextFingerprint;
+    state.screenCaptureFailed = false;
+    updateStatusItem(elements.screenStatus, true, 'Ativa');
+    if (changed) scheduleAutoSuggestion(state.currentTranscription ? 3000 : 5000);
+  } catch (error) {
+    updateStatusItem(elements.screenStatus, false, 'Sem acesso');
+    reportOnce('screen-permission', 'Autorize Gravação de Tela nas configurações de Privacidade do sistema.', 'error');
+    if (!state.screenCaptureFailed) logger.error(`Falha na captura de tela: ${error.message}`);
+    state.screenCaptureFailed = true;
+  }
+}
+
+function fingerprint(value) {
+  let hash = 2166136261;
+  const step = Math.max(1, Math.floor(value.length / 128));
+  for (let index = 0; index < value.length; index += step) {
+    hash ^= value.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return String(hash >>> 0);
+}
+
+function scheduleAutoSuggestion(delay) {
+  if (!state.config.openrouterApiKey) return;
+  clearTimeout(state.suggestionTimer);
+  const throttle = Math.max(0, MIN_SUGGESTION_INTERVAL_MS - (Date.now() - state.lastSuggestionAt));
+  state.suggestionTimer = setTimeout(generateAutoSuggestion, Math.max(delay, throttle));
+}
+
+async function generateAutoSuggestion() {
+  if (!state.isLLMReady || !state.config.openrouterApiKey) return;
+  if (!state.latestScreenFrame && !state.currentTranscription) return;
+  const contextFingerprint = `${state.assistantMode}:${state.screenFingerprint}:${state.currentTranscription}`;
+  if (contextFingerprint === state.lastSuggestionFingerprint) return;
+
+  state.lastSuggestionAt = Date.now();
+  state.isLLMReady = false;
+  updateLLMStatus('Analisando...', true);
+  try {
+    const prompt = window.AssistantModes.buildAssistantPrompt({
+      mode: state.assistantMode,
+      transcript: state.currentTranscription,
+      hasScreen: Boolean(state.latestScreenFrame)
+    });
+    const response = await callLLM(prompt, state.latestScreenFrame);
+    displayResponse(response);
+    state.lastSuggestionFingerprint = contextFingerprint;
+    state.transcriptionHistory.push({ type: 'response', content: response, timestamp: new Date().toISOString() });
+    window.electronAPI.sendLlmResponse(response);
+  } catch (error) {
+    handleContextError('assistente', error);
+  } finally {
+    state.isLLMReady = true;
+    updateLLMStatus('Pronto', false);
+  }
+}
+
+async function sendManualQuestion() {
+  const question = elements.manualInput.value.trim();
+  if (!question || !state.isLLMReady) return;
+  elements.manualInput.value = '';
+  state.isLLMReady = false;
+  elements.responseText.innerHTML = '<p class="placeholder-text">Gerando resposta...</p>';
+  updateLLMStatus('Analisando...', true);
+
+  try {
+    const prompt = window.AssistantModes.buildAssistantPrompt({
+      mode: state.assistantMode,
+      transcript: state.currentTranscription,
+      question,
+      hasScreen: Boolean(state.latestScreenFrame)
+    });
+    const response = await callLLM(prompt, state.latestScreenFrame);
+    displayResponse(response);
+    state.transcriptionHistory.push(
+      { type: 'question', content: question, timestamp: new Date().toISOString() },
+      { type: 'response', content: response, timestamp: new Date().toISOString() }
+    );
+  } catch (error) {
+    handleContextError('assistente', error);
+    elements.responseText.innerHTML = '<p class="placeholder-text">Não foi possível gerar a resposta.</p>';
+  } finally {
+    state.isLLMReady = true;
+    updateLLMStatus('Pronto', false);
+  }
+}
+
+async function callLLM(prompt, screenFrame) {
+  if (!state.config.openrouterApiKey) throw new Error('Configure a chave OpenRouter.');
+  const content = [{ type: 'text', text: prompt }];
+  if (screenFrame) content.push({ type: 'image_url', image_url: { url: screenFrame } });
+
+  const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${state.config.openrouterApiKey}`,
+      'Content-Type': 'application/json',
+      'HTTP-Referer': 'https://newperssua.com',
+      'X-Title': 'New Perssua'
+    },
+    body: JSON.stringify({
+      model: state.config.model || 'google/gemini-2.5-flash',
+      messages: [
+        { role: 'system', content: 'Você é um assistente contextual em tempo real. Seja útil, preciso e discreto.' },
+        { role: 'user', content }
+      ],
+      max_tokens: state.assistantMode === 'meeting' ? 350 : 650,
+      temperature: 0.5
+    })
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(data.error?.message || `OpenRouter retornou ${response.status}`);
+  const answer = data.choices?.[0]?.message?.content?.trim();
+  if (!answer) throw new Error('O modelo não retornou conteúdo.');
+  return answer;
+}
+
+function displayResponse(response) {
+  elements.responseText.innerHTML = parseMarkdown(response);
+  state.currentResponse = response;
+  const container = document.getElementById('response-content');
+  container.scrollTop = container.scrollHeight;
+}
+
 function parseMarkdown(text) {
-  if (!text) return '';
-  
-  let html = text
+  const safe = escapeHtml(text || '')
     .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
     .replace(/\*(.*?)\*/g, '<em>$1</em>')
     .replace(/`(.*?)`/g, '<code>$1</code>')
     .replace(/\n\n/g, '</p><p>')
     .replace(/\n/g, '<br>');
-  
-  return `<p>${html}</p>`;
+  return `<p>${safe}</p>`;
 }
 
-// Copy last response to clipboard
-function copyLastResponse() {
-  if (!state.currentResponse) {
-    showToast('Nenhuma resposta para copiar', 'warning');
-    return;
-  }
-  
-  navigator.clipboard.writeText(state.currentResponse).then(() => {
-    showToast('Resposta copiada!', 'success');
-  }).catch((error) => {
-    showToast('Erro ao copiar: ' + error.message, 'error');
-  });
+function escapeHtml(text) {
+  return text.replace(/[&<>"']/g, character => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;'
+  })[character]);
 }
 
-// Update transcription display
 function updateTranscription(text) {
-  state.currentTranscription = text;
-  elements.transcriptionText.innerHTML = `<p>${text}</p>`;
-  
-  // Auto-scroll to bottom
-  const transcriptionContent = document.getElementById('transcription-content');
-  transcriptionContent.scrollTop = transcriptionContent.scrollHeight;
+  elements.transcriptionText.replaceChildren();
+  const paragraph = document.createElement('p');
+  paragraph.textContent = text;
+  elements.transcriptionText.appendChild(paragraph);
+  const container = document.getElementById('transcription-content');
+  container.scrollTop = container.scrollHeight;
 }
 
-// Show toast notification
+function updateAudioStatus(isActive) {
+  updateStatusItem(elements.audioStatus, isActive, isActive ? 'Ativo' : 'Pausado');
+  elements.transcriptionStatus.textContent = isActive ? 'Ouvindo...' : 'Pausado';
+  elements.btnAudioToggle.classList.toggle('active', isActive);
+  elements.btnAudioToggle.title = isActive ? 'Pausar microfone' : 'Retomar microfone';
+}
+
+function updateLLMStatus(text, active) {
+  updateStatusItem(elements.llmStatusBar, active, text);
+}
+
+function updateStatusItem(element, active, text) {
+  element.querySelector('.status-dot').classList.toggle('active', active);
+  element.querySelector('.status-text').textContent = text;
+}
+
+function showSettingsModal() {
+  elements.settingsModal.classList.remove('hidden');
+}
+
+function hideSettingsModal() {
+  elements.settingsModal.classList.add('hidden');
+}
+
+async function saveSettings() {
+  const configs = {
+    openrouterApiKey: elements.configOpenRouterKey.value.trim(),
+    llmProvider: 'openrouter',
+    model: elements.configModel.value.trim() || 'google/gemini-2.5-flash',
+    transcriptionModel: elements.configTranscriptionModel.value.trim() || 'openai/whisper-1',
+    language: elements.configLanguage.value,
+    opacity: Number(elements.configOpacity.value),
+    assistantMode: state.assistantMode,
+    showTranscription: elements.configShowTranscription.checked
+  };
+
+  try {
+    await window.electronAPI.setMultipleConfigs(configs);
+    state.config = { ...state.config, ...configs };
+    document.body.style.opacity = configs.opacity;
+    applyTranscriptionVisibility();
+    hideSettingsModal();
+    state.lastSuggestionFingerprint = '';
+    scheduleAutoSuggestion(250);
+    showToast('Configurações salvas.', 'success');
+  } catch (error) {
+    showToast(`Erro ao salvar: ${error.message}`, 'error');
+  }
+}
+
+function applyTranscriptionVisibility() {
+  elements.transcriptionSection.style.display = state.config.showTranscription === false ? 'none' : '';
+}
+
+function copyLastResponse() {
+  if (!state.currentResponse) return showToast('Nenhuma resposta para copiar.', 'warning');
+  navigator.clipboard.writeText(state.currentResponse)
+    .then(() => showToast('Resposta copiada.', 'success'))
+    .catch(error => showToast(`Erro ao copiar: ${error.message}`, 'error'));
+}
+
+function handleContextError(area, error) {
+  const message = `Erro no ${area}: ${error.message}`;
+  reportOnce(message, message, 'error');
+  logger.error(message);
+}
+
+function reportOnce(key, message, type) {
+  if (state.lastReportedError === key) return;
+  state.lastReportedError = key;
+  showToast(message, type);
+}
+
 function showToast(message, type = 'info') {
-  const container = document.getElementById('toast-container');
-  
   const toast = document.createElement('div');
   toast.className = `toast ${type}`;
   toast.textContent = message;
-  
-  container.appendChild(toast);
-  
-  // Remove after 3 seconds
-  setTimeout(() => {
-    toast.style.animation = 'slideIn 0.3s ease reverse';
-    setTimeout(() => toast.remove(), 300);
-  }, 3000);
+  document.getElementById('toast-container').appendChild(toast);
+  setTimeout(() => toast.remove(), 3500);
 }
 
-// Update app version
 async function updateVersion() {
   try {
-    const version = await window.electronAPI.getAppVersion();
-    elements.appVersion.textContent = version;
+    elements.appVersion.textContent = await window.electronAPI.getAppVersion();
   } catch (error) {
     logger.error('Erro ao obter versão: ' + error.message);
   }
 }
 
-// Export conversation history
-async function exportHistory() {
-  const now = new Date();
-  const timestamp = now.toISOString().replace(/[:.]/g, '-');
-  const filename = `new-perssua-${timestamp}.md`;
-  
-  let content = '# New Perssua - Histórico da Reunião\n\n';
-  content += `Data: ${now.toLocaleString('pt-BR')}\n\n`;
-  content += '---\n\n';
-  
-  for (const item of state.transcriptionHistory) {
-    const time = new Date(item.timestamp).toLocaleTimeString('pt-BR');
-    const type = item.type === 'question' ? '❓ Pergunta' : '💡 Resposta';
-    content += `**${time}** - ${type}\n\n${item.content}\n\n`;
-  }
-  
-  try {
-    const result = await window.electronAPI.exportHistory(filename, content);
-    if (result.success) {
-      showToast('Histórico exportado com sucesso!', 'success');
-    } else {
-      showToast('Erro ao exportar: ' + result.error, 'error');
-    }
-  } catch (error) {
-    showToast('Erro ao exportar: ' + error.message, 'error');
-  }
-}
+window.addEventListener('beforeunload', () => {
+  clearInterval(state.screenTimer);
+  clearTimeout(state.suggestionTimer);
+  stopAudioCapture();
+});
 
-// Handle errors globally
 window.onerror = (message, source, lineno, colno, error) => {
   logger.error(`Erro global: ${message} (${source}:${lineno}:${colno})`);
-  window.electronAPI.reportError({
-    message,
-    source,
-    lineno,
-    colno,
-    stack: error?.stack
-  });
+  window.electronAPI.reportError({ message, source, lineno, colno, stack: error?.stack });
 };
-
-// Cleanup on unload
-window.addEventListener('beforeunload', () => {
-  if (window.waveformViz) {
-    window.waveformViz.stop();
-  }
-});

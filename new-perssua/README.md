@@ -30,7 +30,7 @@
 
 ## 🌟 Visão Geral
 
-O **New Perssua** é um assistente de reunião que funciona como um overlay invisível no seu desktop. Ele captura o áudio da reunião, transcreve em tempo real usando Whisper, e gera respostas sugeridas via **OpenRouter** (acesso unificado a GPT-4, Claude, Llama e +100 modelos) — tudo sem interferir no seu fluxo de trabalho ou ser detectado em compartilhamentos de tela.
+O **New Perssua** é um assistente contextual que funciona como overlay no desktop. Ao abrir, ele usa o microfone padrão e observa a tela principal, transcreve a fala e gera sugestões via **OpenRouter** de acordo com o modo Reunião ou Estudo.
 
 ### Casos de Uso:
 - ✅ Entrevistas de emprego
@@ -38,6 +38,7 @@ O **New Perssua** é um assistente de reunião que funciona como um overlay invi
 - ✅ Negociações importantes
 - ✅ Reuniões técnicas
 - ✅ Calls com clientes
+- ✅ Aulas e sessões de estudo
 
 ---
 
@@ -50,14 +51,18 @@ O **New Perssua** é um assistente de reunião que funciona como um overlay invi
 - `showInactive()` não rouba foco do aplicativo ativo
 
 ### Captura de Áudio
-- **macOS**: Compatível com BlackHole (driver virtual) + node-mac-permissions
-- **Windows**: Captura via microfone (fallback padrão)
+- Inicia automaticamente com o microfone padrão
+- Usa cancelamento de eco e redução de ruído do sistema
 - Visualização de waveform em tempo real
 
+### Contexto Visual
+- Captura reduzida da tela principal a cada poucos segundos
+- Análise multimodal combinando tela e fala recente
+- Orientação clara para liberar Gravação de Tela no macOS
+
 ### Transcrição em Tempo Real
-- OpenAI Whisper API (rápido e preciso)
-- Whisper.cpp local (gratuito, requer compilação)
-- Auto-detecção de idioma
+- Endpoint de transcrição do OpenRouter usando a mesma API key
+- Idioma configurável
 - Buffer de contexto inteligente (últimos 2-3 minutos)
 
 ### Integração com LLM via OpenRouter
@@ -67,9 +72,8 @@ O **New Perssua** é um assistente de reunião que funciona como um overlay invi
 - Prompt dinâmico com contexto da reunião
 
 ### Modos de Operação
-- **Auto-suggest**: IA sugere respostas automaticamente
-- **Manual**: Você digita perguntas e a IA responde
-- **Teleprompter**: IA gera roteiro baseado no contexto
+- **Reunião**: sugere falas, decisões e próximos passos
+- **Estudo**: explica conceitos, resume e cria anotações
 
 ### Atalhos Globais
 - Ctrl/Cmd + B: Mostrar/Ocultar overlay
@@ -135,17 +139,7 @@ cd new-perssua
 npm install
 ```
 
-3. **Copiar arquivo de ambiente**
-```bash
-cp .env.example .env
-```
-
-4. **Configurar API Key** (editar `.env` ou via UI)
-```bash
-OPENAI_API_KEY=sk-...
-```
-
-5. **Rodar aplicação**
+3. **Rodar aplicação**
 ```bash
 npm start
 ```
@@ -176,17 +170,6 @@ Os binários serão gerados na pasta `dist/`.
    - **Idioma**: pt-BR, en-US, etc.
    - **Opacidade**: Ajuste transparência da janela
 
-### Via Arquivo `.env`
-
-Edite o arquivo `.env` na raiz do projeto:
-
-```env
-OPENROUTER_API_KEY=sk-or-...
-LLM_MODEL=openai/gpt-4-turbo
-LANGUAGE=pt-BR
-WHISPER_MODE=api
-```
-
 ### Obter API Keys
 
 #### OpenRouter (Único Provedor Necessário)
@@ -194,11 +177,6 @@ WHISPER_MODE=api
 2. Faça login/crie conta
 3. Clique em "Create Key"
 4. Copie e cole no app
-
-#### Whisper API (Opcional - para transcrição)
-1. Acesse https://platform.openai.com/api-keys
-2. Crie uma chave (começa com `sk-`)
-3. Configure via UI ou `.env` como `OPENAI_API_KEY`
 
 ---
 
@@ -208,9 +186,9 @@ WHISPER_MODE=api
 
 1. **Inicie o app**: `npm start`
 2. **Configure API Key**: Clique em ⚙️ e preencha
-3. **Posicione o overlay**: Arraste para canto desejado
-4. **Inicie captura de áudio**: Clique no ícone de microfone 🎤
-5. **Participe da reunião**: O overlay é invisível!
+3. **Autorize o acesso**: Libere Microfone e Gravação de Tela quando solicitado
+4. **Escolha o modo**: Reunião ou Estudo
+5. **Comece**: A captura já estará ativa
 
 ### Durante a Reunião
 
@@ -233,7 +211,7 @@ WHISPER_MODE=api
 | `Ctrl/Cmd + B` | Mostrar/Ocultar overlay |
 | `Ctrl/Cmd + K` | Focar input manual |
 | `Ctrl/Cmd + Shift + S` | Iniciar/Parar captura de áudio |
-| `Ctrl/Cmd + Shift + M` | Alternar modo (Auto/Manual) |
+| `Ctrl/Cmd + Shift + M` | Alternar modo (Reunião/Estudo) |
 | `Ctrl/Cmd + Shift + C` | Copiar última resposta |
 | `Ctrl/Cmd + H` | Ocultar rapidamente |
 | `Ctrl/Cmd + Shift + E` | Exportar histórico |
@@ -314,20 +292,15 @@ Use modelos mais baratos (Llama-3, Gemini) para reduzir custos para ~$5/mês.
 Teste abrindo o Photo Booth (macOS) ou Camera (Windows) e veja se a janela aparece.
 
 ### Problema 2: Áudio não está sendo capturado
-**Windows**:
-- Instale drivers de áudio atualizados
-- Tente usar modo "Microfone" nas configurações
+**Windows**: confirme o acesso ao microfone nas configurações de Privacidade.
 
-**macOS**:
-- Instale BlackHole: `brew install blackhole-2ch`
-- Dê permissões em System Preferences > Security & Privacy > Microphone
+**macOS**: autorize o app em Ajustes do Sistema > Privacidade e Segurança > Microfone.
 
 ### Problema 3: Erro "API key não configurada"
 **Solução**:
-1. Verifique se `.env` existe na raiz
-2. Confirme que `OPENAI_API_KEY` está preenchido
-3. Reinicie o app após editar `.env`
-4. Ou configure via UI (ícone de engrenagem)
+1. Abra as configurações pelo ícone de engrenagem
+2. Confirme que a chave `OpenRouter API Key` está preenchida
+3. Salve; a captura não precisa ser reiniciada
 
 ### Problema 4: Atalhos não funcionam
 **Solução**:

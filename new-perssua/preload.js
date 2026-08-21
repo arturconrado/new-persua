@@ -21,12 +21,16 @@ contextBridge.exposeInMainWorld('electronAPI', {
   
   // Captura de áudio
   toggleAudioCapture: () => ipcRenderer.send('toggle-audio-capture'),
+  setAudioCaptureActive: (isActive) => ipcRenderer.send('audio-capture-state', isActive),
   onAudioCaptureToggled: (callback) => {
     ipcRenderer.on('audio-capture-toggled', (event, isActive) => callback(isActive));
   },
   onStopAudioCapture: (callback) => {
     ipcRenderer.on('stop-audio-capture', () => callback());
   },
+
+  // Contexto visual (imagem JPEG em base64 da tela principal)
+  captureScreenFrame: () => ipcRenderer.invoke('capture-screen-frame'),
   
   // Input manual
   onFocusManualInput: (callback) => {
@@ -35,7 +39,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   
   // Modo
   onModeChanged: (callback) => {
-    ipcRenderer.on('mode-changed', (event, isAutoMode) => callback(isAutoMode));
+    ipcRenderer.on('mode-changed', (event, mode) => callback(mode));
   },
   
   // Copiar resposta

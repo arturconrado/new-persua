@@ -1,13 +1,12 @@
 {
   "openrouterApiKey": "",
   "llmProvider": "openrouter",
-  "model": "openai/gpt-4-turbo",
+  "model": "google/gemini-2.5-flash",
+  "transcriptionModel": "openai/whisper-1",
   "language": "pt-BR",
   "opacity": 0.95,
-  "autoSuggestMode": false,
+  "assistantMode": "meeting",
   "showTranscription": true,
-  "audioSource": "system",
-  "whisperMode": "api",
   "windowPosition": {
     "x": null,
     "y": null,

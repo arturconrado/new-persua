@@ -3,7 +3,7 @@
  * Processo principal do Electron com configuração de overlay invisível
  */
 
-const { app, BrowserWindow, ipcMain, globalShortcut, screen, nativeTheme } = require('electron');
+const { app, BrowserWindow, desktopCapturer, ipcMain, globalShortcut, screen } = require('electron');
 const path = require('path');
 const Store = require('electron-store');
 const fs = require('fs');
@@ -13,20 +13,19 @@ const store = new Store({
   defaults: {
     openrouterApiKey: '',
     llmProvider: 'openrouter', // 'openrouter' (único provedor)
-    model: 'openai/gpt-4-turbo',
+    model: 'google/gemini-2.5-flash',
+    transcriptionModel: 'openai/whisper-1',
     language: 'pt-BR',
     opacity: 0.95,
-    autoSuggestMode: false,
+    assistantMode: 'meeting',
     showTranscription: true,
-    audioSource: 'system', // 'system' | 'microphone'
-    whisperMode: 'api', // 'api' | 'local'
     windowPosition: { x: null, y: null, width: 400, height: 600 }
   }
 });
 
 let mainWindow = null;
 let isOverlayVisible = false;
-let audioCaptureActive = false;
+let audioCaptureActive = true;
 
 // Configurações da janela overlay invisível
 function createWindow() {
@@ -69,7 +68,7 @@ function createWindow() {
       contextIsolation: true,
       preload: path.join(__dirname, 'preload.js'),
       sandbox: false,
-      webSecurity: false, // Permitir CORS local para desenvolvimento
+      webSecurity: true,
       enableRemoteModule: false
     },
     
@@ -175,12 +174,12 @@ function registerGlobalShortcuts() {
     toggleAudioCapture();
   });
 
-  // Ctrl/Cmd + Shift + M: Alternar modo (Auto/Manual)
+  // Ctrl/Cmd + Shift + M: Alternar modo (Reunião/Estudo)
   globalShortcut.register('CommandOrControl+Shift+M', () => {
     if (mainWindow) {
-      const currentMode = store.get('autoSuggestMode');
-      store.set('autoSuggestMode', !currentMode);
-      mainWindow.webContents.send('mode-changed', !currentMode);
+      const nextMode = store.get('assistantMode') === 'study' ? 'meeting' : 'study';
+      store.set('assistantMode', nextMode);
+      mainWindow.webContents.send('mode-changed', nextMode);
     }
   });
 
@@ -258,6 +257,27 @@ function setupIpcHandlers() {
   // Toggle audio capture
   ipcMain.on('toggle-audio-capture', () => {
     toggleAudioCapture();
+  });
+
+  ipcMain.on('audio-capture-state', (event, isActive) => {
+    audioCaptureActive = Boolean(isActive);
+  });
+
+  // Retorna somente uma imagem reduzida da tela principal ao renderer.
+  ipcMain.handle('capture-screen-frame', async () => {
+    const sources = await desktopCapturer.getSources({
+      types: ['screen'],
+      thumbnailSize: { width: 960, height: 540 },
+      fetchWindowIcons: false
+    });
+    const primaryId = String(screen.getPrimaryDisplay().id);
+    const source = sources.find(item => item.display_id === primaryId) || sources[0];
+
+    if (!source || source.thumbnail.isEmpty()) {
+      throw new Error('Nenhuma tela disponível para captura.');
+    }
+
+    return source.thumbnail.toJPEG(70).toString('base64');
   });
 
   // Audio data received from renderer

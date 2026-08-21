@@ -246,4 +246,6 @@ if (typeof window !== 'undefined') {
   window.WaveformVisualizer = WaveformVisualizer;
 }
 
-module.exports = WaveformVisualizer;
+if (typeof module !== 'undefined') {
+  module.exports = WaveformVisualizer;
+}

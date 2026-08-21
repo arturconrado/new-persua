@@ -3,8 +3,8 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; font-src 'self' data:;">
-  <title>New Perssua - Assistente de Reunião</title>
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; connect-src https://openrouter.ai; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self' data:; img-src 'self' data:; media-src blob:;">
+  <title>New Perssua - Assistente Contextual</title>
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
@@ -34,8 +34,11 @@
           <canvas id="waveform-canvas"></canvas>
         </div>
         
-        <!-- Indicador do modo -->
-        <span id="mode-indicator" class="mode-indicator" title="Modo atual">AUTO</span>
+        <!-- Os únicos modos operacionais do assistente -->
+        <select id="mode-selector" class="mode-selector" title="Modo atual">
+          <option value="meeting">Reunião</option>
+          <option value="study">Estudo</option>
+        </select>
         
         <!-- Botão de configurações -->
         <button id="btn-settings" class="icon-btn" title="Configurações">
@@ -63,7 +66,7 @@
     <!-- Área de respostas da IA -->
     <section id="response-section" class="section response-section">
       <div class="section-header">
-        <h2 class="section-title">Respostas Sugeridas</h2>
+        <h2 id="response-section-title" class="section-title">Sugestões da Reunião</h2>
         <button id="btn-copy-response" class="small-btn" title="Copiar resposta">
           <svg class="icon icon-copy" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
@@ -73,7 +76,7 @@
       </div>
       <div id="response-content" class="content-area">
         <div id="response-text" class="text-content ai-response">
-          <p class="placeholder-text">As respostas da IA aparecerão aqui...</p>
+          <p class="placeholder-text">Observando a tela e ouvindo o contexto...</p>
         </div>
       </div>
     </section>
@@ -104,9 +107,9 @@
           <span class="status-dot"></span>
           Áudio: <span class="status-text">Inativo</span>
         </span>
-        <span id="transcription-status-bar" class="status-item">
+        <span id="screen-status" class="status-item">
           <span class="status-dot"></span>
-          Transcrição: <span class="status-text">Inativa</span>
+          Tela: <span class="status-text">Inativa</span>
         </span>
         <span id="llm-status-bar" class="status-item">
           <span class="status-dot"></span>
@@ -124,9 +127,12 @@
       <div class="modal-content">
         <div class="modal-header">
           <h2 class="modal-title">Configurações</h2>
-          <button id="btn-close-settings" class="close-btn">&times;</button>
+          <button id="btn-close-settings" class="close-btn" aria-label="Fechar configurações">&times;</button>
         </div>
-        
+
+        <div class="modal-body">
+          <p class="settings-intro">A captura da tela e do microfone padrão começa automaticamente. No macOS, autorize Microfone e Gravação de Tela quando solicitado.</p>
+
           <!-- Provedor LLM -->
           <div class="setting-group">
             <label class="setting-label">Provedor LLM</label>
@@ -146,8 +152,14 @@
           <!-- Modelo -->
           <div class="setting-group">
             <label class="setting-label">Modelo</label>
-            <input type="text" id="config-model" class="setting-input" placeholder="openai/gpt-4-turbo, anthropic/claude-3-opus" />
-            <small class="setting-help">Veja modelos em: https://openrouter.ai/models</small>
+            <input type="text" id="config-model" class="setting-input" placeholder="google/gemini-2.5-flash" />
+            <small class="setting-help">Use um modelo com entrada de imagem para interpretar a tela.</small>
+          </div>
+
+          <!-- Modelo de transcrição -->
+          <div class="setting-group">
+            <label class="setting-label">Modelo de Transcrição</label>
+            <input type="text" id="config-transcription-model" class="setting-input" placeholder="openai/whisper-1" />
           </div>
 
           <!-- Idioma -->
@@ -162,42 +174,11 @@
             </select>
           </div>
 
-          <!-- Modo Whisper -->
-          <div class="setting-group">
-            <label class="setting-label">Modo Whisper</label>
-            <select id="config-whisper-mode" class="setting-select">
-              <option value="api">API (Pago, Rápido)</option>
-              <option value="local">Local (Gratuito, Requer instalação)</option>
-            </select>
-          </div>
-
           <!-- Opacidade -->
           <div class="setting-group">
             <label class="setting-label">Opacidade da Janela</label>
             <input type="range" id="config-opacity" class="setting-range" min="0.5" max="1" step="0.05" />
             <span id="opacity-value" class="setting-value">95%</span>
-          </div>
-
-          <!-- Fonte de Áudio -->
-          <div class="setting-group">
-            <label class="setting-label">Fonte de Áudio</label>
-            <select id="config-audio-source" class="setting-select">
-              <option value="system">Áudio do Sistema (Recomendado)</option>
-              <option value="microphone">Microfone</option>
-            </select>
-            <small class="setting-help" id="audio-source-help">
-              Windows: Requer windows-audio-capture<br>
-              macOS: Requer BlackHole instalado
-            </small>
-          </div>
-
-          <!-- Modo Auto-suggest -->
-          <div class="setting-group">
-            <label class="setting-label toggle-label">
-              <span>Auto-suggest (Sugestões Automáticas)</span>
-              <input type="checkbox" id="config-auto-suggest" class="toggle-input" />
-              <span class="toggle-slider"></span>
-            </label>
           </div>
 
           <!-- Mostrar transcrição -->
@@ -224,6 +205,7 @@
 
   <!-- Scripts -->
   <script src="src/audio/waveform.js"></script>
+  <script src="src/context/assistantModes.js"></script>
   <script src="renderer.js"></script>
 </body>
 </html>

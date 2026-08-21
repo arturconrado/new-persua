@@ -1,11 +1,12 @@
 {
   "name": "new-perssua",
   "version": "1.0.0",
-  "description": "Assistente de Reunião Invisível - Overlay desktop com transcrição e IA em tempo real",
+  "description": "Assistente contextual para reuniões e estudos com tela, transcrição e IA em tempo real",
   "main": "main.js",
   "scripts": {
     "start": "electron .",
     "dev": "electron . --enable-logging",
+    "test": "node test/assistantModes.test.js",
     "build": "electron-builder",
     "build:whisper": "bash scripts/build-whisper.sh",
     "build:whisper:win": "scripts\\build-whisper.bat"
@@ -43,6 +44,10 @@
     ],
     "mac": {
       "category": "public.app-category.productivity",
+      "extendInfo": {
+        "NSMicrophoneUsageDescription": "O New Perssua usa o microfone para entender o contexto da reunião ou do estudo.",
+        "NSScreenCaptureUsageDescription": "O New Perssua usa a tela para oferecer ajuda contextual em tempo real."
+      },
       "target": [
         "dmg",
         "zip"
